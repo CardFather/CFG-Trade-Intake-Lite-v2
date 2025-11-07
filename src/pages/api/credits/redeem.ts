@@ -1,20 +1,16 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabase, setCustomerCreditCents } from "@/lib";
 
-// POST /api/credits/redeem
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") return res.status(405).end();
 
   const { shopify_customer_id, amount_cents, reason } = req.body || {};
-
   if (!shopify_customer_id || !amount_cents) {
     return res.status(400).json({ error: "Missing fields" });
   }
 
-  // Convert to negative for redemption
   const delta = -Math.abs(parseInt(String(amount_cents), 10) || 0);
 
-  // 1️⃣ Add ledger entry
   const { error: e1 } = await supabase.from("store_credit_ledger").insert({
     shopify_customer_id,
     delta_cents: delta,
@@ -22,20 +18,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     reference: null,
     actor: "system",
   });
-
   if (e1) return res.status(500).json({ error: e1.message });
 
-  // 2️⃣ Recalc balance
   const { data: all, error: e2 } = await supabase
     .from("store_credit_ledger")
     .select("delta_cents")
     .eq("shopify_customer_id", shopify_customer_id);
-
   if (e2) return res.status(500).json({ error: e2.message });
 
   const balance = (all || []).reduce((a, r) => a + (r.delta_cents || 0), 0);
 
-  // 3️⃣ Push balance to Shopify metafield
   try {
     await setCustomerCreditCents(shopify_customer_id, balance);
   } catch (err: any) {

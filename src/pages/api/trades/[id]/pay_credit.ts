@@ -1,1 +1,28 @@
-import type { NextApiRequest, NextApiResponse } from 'next'; import { supabase } from '../../../lib/supabase'; import { setCustomerCreditCents } from '../../../lib/shopify'; export default async function h(req:NextApiRequest,res:NextApiResponse){ const {id}=req.query; if(req.method!=='POST') return res.status(405).end(); if(!id||typeof id!=='string') return res.status(400).json({error:'Missing id'}); const {data:trade,error:e1}=await supabase.from('trades').select('*').eq('id',id).single(); if(e1||!trade) return res.status(404).json({error:e1?.message||'Trade not found'}); if(!trade.shopify_customer_id) return res.status(400).json({error:'No Shopify customer linked'}); if(!trade.credit_value_cents) return res.status(400).json({error:'credit_value_cents missing'}); const {error:e2}=await supabase.from('store_credit_ledger').insert({shopify_customer_id:trade.shopify_customer_id,delta_cents:trade.credit_value_cents,reason:'Trade credit',reference:trade.intake_id,actor:'system'}); if(e2) return res.status(500).json({error:e2.message}); const {data:all,error:e3}=await supabase.from('store_credit_ledger').select('delta_cents').eq('shopify_customer_id',trade.shopify_customer_id); if(e3) return res.status(500).json({error:e3.message}); const balance=(all||[]).reduce((a,r)=>a+(r.delta_cents||0),0); try{ await setCustomerCreditCents(trade.shopify_customer_id,balance);}catch(err:any){ return res.status(500).json({error:'Shopify metafield update failed: '+err.message}); } const {data:upd,error:e4}=await supabase.from('trades').update({status:'PAID',payout_type:'CREDIT',paid_at:new Date().toISOString()}).eq('id',id).select().single(); if(e4) return res.status(500).json({error:e4.message}); return res.json({trade:upd,balance_cents:balance}); }
+import type { NextApiRequest, NextApiResponse } from "next";
+import { supabase } from "../../../lib/supabase";
+import { setCustomerCreditCents } from "../../../lib/shopify";
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  const { id } = req.query;
+  if (req.method !== "POST") return res.status(405).end();
+  if (!id || typeof id !== "string") return res.status(400).json({ error: "Missing id" });
+  const { data: trade, error: errTrade } = await supabase.from("trades").select("*").eq("id", id).single();
+  if (errTrade || !trade) return res.status(404).json({ error: errTrade?.message || "Trade not found" });
+  if (!trade.shopify_customer_id) return res.status(400).json({ error: "No Shopify customer linked" });
+  if (!trade.credit_value_cents) return res.status(400).json({ error: "credit_value_cents missing" });
+  const { error: errLedger } = await supabase.from("store_credit_ledger").insert({
+    shopify_customer_id: trade.shopify_customer_id,
+    delta_cents: trade.credit_value_cents,
+    reason: "Trade credit",
+    reference: trade.intake_id,
+    actor: "system"
+  });
+  if (errLedger) return res.status(500).json({ error: errLedger.message });
+  const { data: all, error: errSum } = await supabase.from("store_credit_ledger").select("delta_cents").eq("shopify_customer_id", trade.shopify_customer_id);
+  if (errSum) return res.status(500).json({ error: errSum.message });
+  const balance = (all||[]).reduce((a,r)=>a+(r.delta_cents||0),0);
+  try { await setCustomerCreditCents(trade.shopify_customer_id, balance); }
+  catch(e:any){ return res.status(500).json({ error: "Shopify metafield update failed: "+e.message }); }
+  const { data: updated, error: errUpd } = await supabase.from("trades").update({ status: "PAID", payout_type: "CREDIT", paid_at: new Date().toISOString() }).eq("id", id).select().single();
+  if (errUpd) return res.status(500).json({ error: errUpd.message });
+  return res.json({ trade: updated, balance_cents: balance });
+}

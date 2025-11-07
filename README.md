@@ -1,1 +1,1 @@
-# CFG Trade Intake Lite (v3) — full UI added
+# CFG Trade Intake Lite v3.2 — clean repo (relative imports only)
